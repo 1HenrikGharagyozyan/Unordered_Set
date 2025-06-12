@@ -7,6 +7,7 @@
 #include <iterator>
 #include <cstddef>
 #include <stdexcept>
+
 #include "Unordered_Set.h"
 
 template<typename Key, typename T = Key, typename Hash = std::hash<Key>, 
@@ -104,6 +105,7 @@ public:
     HashTable(std::initializer_list<value_type> init);
     HashTable(const HashTable& other);
     HashTable(HashTable&& other) noexcept;
+    HashTable(size_type capacity, const hasher& hash, const key_equal& eq);
     ~HashTable();
 
     HashTable& operator=(const HashTable& other);
@@ -349,6 +351,14 @@ inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(HashTable&&
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
+inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(size_type capacity, const hasher& hash, const key_equal& eq)
+    : _buckets(capacity, nullptr)
+    , _hash_fn(hash)
+    , _key_eq(eq)
+{
+}
+
+template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
 inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::~HashTable()
 {
     clear();
@@ -580,6 +590,7 @@ typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::mapped_type&
     {
         if (_key_eq(get_key(node->_data), key))
             return node->_data.second;
+        node = node->_next;
     }
 
     value_type new_pair(std::move(key), mapped_type());
