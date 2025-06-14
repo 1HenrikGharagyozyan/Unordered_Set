@@ -8,8 +8,6 @@
 #include <cstddef>
 #include <stdexcept>
 
-#include "Unordered_Set.h"
-
 template<typename Key, typename T = Key, typename Hash = std::hash<Key>, 
     typename KeyEqual = std::equal_to<Key>, bool AllowDuplicates = false>
 class HashTable
