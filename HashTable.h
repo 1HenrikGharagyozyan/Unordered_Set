@@ -8,8 +8,28 @@
 #include <cstddef>
 #include <stdexcept>
 
-template<typename Key, typename T = Key, typename Hash = std::hash<Key>, 
-    typename KeyEqual = std::equal_to<Key>, bool AllowDuplicates = false>
+struct EmptyStruct
+{
+};
+
+inline bool operator==(const EmptyStruct&, const EmptyStruct&) 
+{ 
+    return true; 
+}
+
+inline bool operator!=(const EmptyStruct&, const EmptyStruct&) 
+{ 
+    return false; 
+}
+
+
+template<
+    typename Key, 
+    typename T = EmptyStruct, 
+    typename Hash = std::hash<Key>, 
+    typename KeyEqual = std::equal_to<Key>, 
+    bool AllowDuplicates = false
+>
 class HashTable
 {
 public:
@@ -18,10 +38,10 @@ public:
     using hasher = Hash;
     using key_equal = KeyEqual;
     using size_type = std::size_t;
-    using value_type = std::conditional_t<std::is_same_v<Key, T>, Key, std::pair<const Key, T>>;
+    using value_type = std::pair<const Key, T>;
 
 private:
-    struct Node
+    struct Node 
     {
         Node* _next;
         value_type _data;
@@ -29,14 +49,21 @@ private:
         template<typename K, typename V>
         Node(K&& key, V&& value, Node* next = nullptr)
             : _next(next)
-            , _data(std::forward<K>(key), std::forward<V>(value)) 
+            , _data(std::piecewise_construct,
+                std::forward_as_tuple(std::forward<K>(key)),
+                std::forward_as_tuple(std::forward<V>(value)))
         {
         }
 
-        template<typename K, typename = std::enable_if_t<std::is_constructible_v<value_type, K&&>>>
-        explicit Node(K&& key_or_value, Node* next = nullptr)
+        explicit Node(const value_type& val, Node* next = nullptr)
             : _next(next)
-            , _data(std::forward<K>(key_or_value))
+            , _data(val)
+        {
+        }
+
+        explicit Node(value_type&& val, Node* next = nullptr)
+            : _next(next)
+            , _data(std::move(val))
         {
         }
 
@@ -52,8 +79,6 @@ private:
     KeyEqual _key_eq;
 
     const key_type& get_key(const value_type& val) const;
-
-    const key_type& get_key_from_value(const value_type& val) const;
 
     void check_load();
 
@@ -98,12 +123,9 @@ public:
     using iterator = HashIterator<false>;
     using const_iterator = HashIterator<true>;
 
-
-    HashTable(size_type capacity = 16);
-    HashTable(std::initializer_list<value_type> init);
+    HashTable(size_type capacity = 16, const hasher& = Hash(), const key_equal& equal = KeyEqual());
     HashTable(const HashTable& other);
     HashTable(HashTable&& other) noexcept;
-    HashTable(size_type capacity, const hasher& hash, const key_equal& eq);
     ~HashTable();
 
     HashTable& operator=(const HashTable& other);
@@ -120,6 +142,12 @@ public:
 
     template<typename... Args>
     std::pair<iterator, bool> try_emplace(const Key& key, Args&&... args);
+
+    template<typename U = T>
+    std::enable_if_t<std::is_same<U, EmptyStruct>::value, std::pair<iterator, bool>> insert(const Key& key);
+
+    template<typename U = T>
+    std::enable_if_t<std::is_same<U, EmptyStruct>::value, std::pair<iterator, bool>> emplace(const Key& key);
 
     iterator find(const key_type& key);
     const_iterator find(const key_type& key) const;
@@ -173,20 +201,7 @@ template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowD
 inline const typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::key_type& 
             HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::get_key(const value_type& val) const
 {
-    if constexpr (std::is_same_v<key_type, mapped_type>)
-        return val;
-    else
-        return val.first;
-}
-
-template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
-inline const typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::key_type& 
-            HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::get_key_from_value(const value_type& val) const
-{
-    if constexpr (std::is_same_v<key_type, mapped_type>)
-        return val;
-    else
-        return val.first;
+    return val.first;
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -321,17 +336,11 @@ inline bool HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashIterator<IsC
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
-inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(size_type capacity)
+inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(size_type capacity, const hasher& hash, const key_equal& equal)
     : _buckets(capacity, nullptr)
+    , _hash_fn(hash)
+    , _key_eq(equal)
 {
-}
-
-template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
-inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(std::initializer_list<value_type> init)
-    : HashTable(init.size())
-{
-    for (const auto& kv : init)
-        insert(kv);
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -346,14 +355,6 @@ template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowD
 inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(HashTable&& other) noexcept
 {
     swap(other);
-}
-
-template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
-inline HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::HashTable(size_type capacity, const hasher& hash, const key_equal& eq)
-    : _buckets(capacity, nullptr)
-    , _hash_fn(hash)
-    , _key_eq(eq)
-{
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -396,7 +397,7 @@ template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowD
 std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::iterator, bool>
             HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::insert(const value_type& kv) 
 {
-    const key_type& key = get_key_from_value(kv);
+    const key_type& key = get_key(kv);
     size_type index = bucket_index(key);
     Node* node = _buckets[index];
 
@@ -420,7 +421,7 @@ template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowD
 std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::iterator, bool>
             HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::insert(value_type&& kv) 
 {
-    const key_type& key = get_key_from_value(kv);
+    const key_type& key = get_key(kv);
     size_type index = bucket_index(key);
     Node* node = _buckets[index];
 
@@ -464,13 +465,13 @@ inline std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::it
     return { iterator(_buckets.data() + index, _buckets.data() + _buckets.size(), _buckets[index]), true };
 }
 
+
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
 template<typename ...Args>
 inline std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::iterator, bool> 
-            HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::emplace(Args && ...args)
+            HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::emplace(Args&&... args)
 {
-    value_type val(std::forward<Args>(args)...);
-    return insert(val);
+    return insert(args...);
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -496,6 +497,24 @@ inline std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::it
     ++_size;
     check_load();
     return { iterator(_buckets.data() + index, _buckets.data() + _buckets.size(), _buckets[index]), true };
+}
+
+template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
+template<typename U>
+inline std::enable_if_t<std::is_same<U, EmptyStruct>::value, std::pair<
+        typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::iterator, bool>> 
+        HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::insert(const Key& key)
+{
+    return insert(key, EmptyStruct{});
+}
+
+template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
+template<typename U>
+inline std::enable_if_t<std::is_same<U, EmptyStruct>::value, std::pair<
+        typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::iterator, bool>> 
+        HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::emplace(const Key& key)
+{
+    return insert(key);
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -604,9 +623,14 @@ typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::mapped_type&
 {
     size_type index = bucket_index(key);
     Node* node = _buckets[index];
-    if (!node)
-        throw std::out_of_range("HashTable::at - key not found");
-    return node->_data.second;
+    while (node)
+    {
+        if (_key_eq(get_key(node->_data), key))
+            return node->_data.second;
+        node = node->_next;
+    }
+    throw std::out_of_range("HashTable::at - key not found");
+
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -615,9 +639,14 @@ inline const typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::mapped
 {
     size_type index = bucket_index(key);
     Node* node = _buckets[index];
-    if (!node)
-        throw std::out_of_range("HashTable::at - key not found");
-    return node->_data.second;
+    while (node)
+    {
+        if (_key_eq(get_key(node->_data), key))
+            return node->_data.second;
+        node = node->_next;
+    }
+    throw std::out_of_range("HashTable::at - key not found");
+
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -625,12 +654,13 @@ inline std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::it
     typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::iterator> 
     HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::equal_range(const Key& key)
 {
-    auto it = find(key);
-    if (it == end())
-        return { it, it };
-    auto next = it;
-    ++next;
-    return { it, next };
+    auto first = find(key);
+    if (first == end())
+        return { first, first };
+    auto last = first;
+    while (last != end() && _key_eq(get_key(*last), key))
+        ++last;
+    return { first, last };
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>
@@ -638,12 +668,13 @@ inline std::pair<typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::co
     typename HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::const_iterator> 
     HashTable<Key, T, Hash, KeyEqual, AllowDuplicates>::equal_range(const Key& key) const
 {
-    auto it = find(key);
-    if (it == end())
-        return { it, it };
-    auto next = it;
-    ++next;
-    return { it, next };
+    auto first = find(key);
+    if (first == end())
+        return { first, first };
+    auto last = first;
+    while (last != end() && _key_eq(get_key(*last), key))
+        ++last;
+    return { first, last };
 }
 
 template<typename Key, typename T, typename Hash, typename KeyEqual, bool AllowDuplicates>

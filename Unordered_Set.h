@@ -6,7 +6,7 @@ template<typename Key, typename Hash = std::hash<Key>, typename KeyEqual = std::
 class Unordered_Set
 {
 private:
-	using Table = HashTable<Key, Key, Hash, KeyEqual, false>;
+	using Table = HashTable<Key, EmptyStruct, Hash, KeyEqual, false>;
 	Table _table;
 
 public:
@@ -22,8 +22,38 @@ public:
 	using pointer = value_type*;
 	using const_pointer = const value_type*;
 
-	using iterator = typename Table::iterator;
-	using const_iterator = typename Table::const_iterator;
+	template<bool IsConst>
+	class SetIterator 
+	{
+	private:
+		using TableIterator = std::conditional_t<IsConst, typename Table::const_iterator, typename Table::iterator>;
+
+		TableIterator _it;
+
+	public:
+		using iterator_category = std::forward_iterator_tag;
+		using value_type = Key;
+		using reference = const Key&;     
+		using pointer = const Key*;
+		using difference_type = std::ptrdiff_t;
+
+		SetIterator() = default;
+		explicit SetIterator(TableIterator it);
+
+		reference operator*() const;
+		pointer operator->() const;
+
+		SetIterator& operator++();
+		SetIterator operator++(int);
+
+		bool operator==(const SetIterator& rhs) const;
+		bool operator!=(const SetIterator& rhs) const;
+	};
+
+
+
+	using iterator = SetIterator<false>;
+	using const_iterator = SetIterator<true>;
 
 	Unordered_Set();
 	~Unordered_Set();
@@ -50,10 +80,8 @@ public:
 	const_iterator cbegin() const noexcept;
 	const_iterator cend() const noexcept;
 
-	bool empty() const noexcept;
-	size_type size() const noexcept;
-
-	void clear() noexcept;
+	[[nodiscard]] bool empty() const noexcept;
+	[[nodiscard]] size_type size() const noexcept;
 
 	std::pair<iterator, bool> insert(const value_type& value);
 	std::pair<iterator, bool> insert(value_type&& value);
@@ -68,12 +96,16 @@ public:
 
 	size_type erase(const key_type& key);
 
+	void clear() noexcept;
+
 	void swap(Unordered_Set& other) noexcept;
 
 	size_type count(const key_type& key) const;
 	
 	iterator find(const key_type& key);
 	const_iterator find(const key_type& key) const;
+
+	bool contains(const key_type& key) const;
 
 	std::pair<iterator, iterator> equal_range(const key_type& key);
 	std::pair<const_iterator, const_iterator> equal_range(const key_type& key) const;
@@ -162,13 +194,13 @@ Unordered_Set<Key, Hash, KeyEqual>& Unordered_Set<Key, Hash, KeyEqual>::operator
 template<typename Key, typename Hash, typename KeyEqual>
 typename Unordered_Set<Key, Hash, KeyEqual>::iterator Unordered_Set<Key, Hash, KeyEqual>::begin() noexcept
 {
-	return _table.begin();
+	return iterator(_table.begin());
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
 typename Unordered_Set<Key, Hash, KeyEqual>::iterator Unordered_Set<Key, Hash, KeyEqual>::end() noexcept
 {
-	return _table.end();
+	return iterator(_table.end());
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
@@ -217,13 +249,15 @@ template<typename Key, typename Hash, typename KeyEqual>
 std::pair<typename Unordered_Set<Key, Hash, KeyEqual>::iterator, bool> 
 		Unordered_Set<Key, Hash, KeyEqual>::insert(const value_type& value)
 {
-	return _table.insert(value);
+	auto [it, success] = _table.insert(value);
+	return { iterator(it), success };
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
 std::pair<typename Unordered_Set<Key, Hash, KeyEqual>::iterator, bool> Unordered_Set<Key, Hash, KeyEqual>::insert(value_type&& value)
 {
-	return _table.insert(std::move(value));
+	auto [it, success] = _table.insert(std::move(value));
+	return { iterator(it), success };
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
@@ -245,7 +279,8 @@ template<typename Key, typename Hash, typename KeyEqual>
 template<typename... Args>
 std::pair<typename Unordered_Set<Key, Hash, KeyEqual>::iterator, bool> Unordered_Set<Key, Hash, KeyEqual>::emplace(Args&&... args)
 {
-	return _table.emplace(std::forward<Args>(args)...);
+	auto [it, success] = _table.emplace(std::forward<Args>(args)...);
+	return { iterator(it), success };
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
@@ -269,13 +304,19 @@ typename Unordered_Set<Key, Hash, KeyEqual>::size_type Unordered_Set<Key, Hash, 
 template<typename Key, typename Hash, typename KeyEqual>
 typename Unordered_Set<Key, Hash, KeyEqual>::iterator Unordered_Set<Key, Hash, KeyEqual>::find(const key_type& key)
 {
-	return _table.find(key);
+	return iterator(_table.find(key));
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
 typename Unordered_Set<Key, Hash, KeyEqual>::const_iterator Unordered_Set<Key, Hash, KeyEqual>::find(const key_type& key) const
 {
-	return _table.find(key);
+	return const_iterator(_table.find(key));
+}
+
+template<typename Key, typename Hash, typename KeyEqual>
+bool Unordered_Set<Key, Hash, KeyEqual>::contains(const key_type& key) const
+{
+	return find(key) != end();
 }
 
 template<typename Key, typename Hash, typename KeyEqual>
@@ -359,4 +400,56 @@ void swap(Unordered_Set<Key, Hash, KeyEqual>& lhs, Unordered_Set<Key, Hash, KeyE
 	lhs.swap(rhs);
 }
 
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+inline Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::SetIterator(TableIterator it)
+	: _it(it) 
+{
+}
 
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+typename Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::reference 
+		Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::operator*() const
+{
+	return _it->first;
+}
+
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+typename Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::pointer 
+		Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::operator->() const
+{
+	return &(_it->first);
+}
+
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>& Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::operator++()
+{
+	++_it;
+	return *this;
+}
+
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst> Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::operator++(int)
+{
+	SetIterator tmp = *this;
+	++_it;
+	return tmp;
+}
+
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+bool Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::operator==(const SetIterator& rhs) const
+{
+	return _it == rhs._it;
+}
+
+template<typename Key, typename Hash, typename KeyEqual>
+template<bool IsConst>
+bool Unordered_Set<Key, Hash, KeyEqual>::SetIterator<IsConst>::operator!=(const SetIterator& rhs) const
+{
+	return _it != rhs._it;
+}
